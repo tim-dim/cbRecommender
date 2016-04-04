@@ -1,0 +1,185 @@
+---
+title: "Content-based Recommender"
+author: "Tim Eck"
+date: "1. Juni 2015"
+output:
+  html_document:
+    highlight: haddock
+---
+##About the Task
+
+Result of the exercise is a functional content-based recommender for movie recommendations, which takes as inputs:
+
+* a data frame `titleFilmDF` listing the movies and their corresponding genre affiliation (note that I only display the first seven attributes, more genres are Comedy  Crime	Documentary	Drama	Fantasy	FilmNoir	Horror	Musical	Mystery	Romance	SciFi	Thriller	War	Western)
+
+```{r,echo=FALSE}
+titleFilmDF<-read.csv("uitem.csv",header=TRUE, sep=";", na.strings = "")
+head(titleFilmDF[,1:7],5)
+```
+* a data frame `userDF` with the ratings of a single user for the movies he watched 
+
+```{r,echo=FALSE}
+userDF<-read.csv("udata.csv",header=TRUE, sep=";", na.strings = "")
+head(userDF,5)
+```
+
+* a `userID` for which the Recommender recommends movies
+
+* and the number `no_films` of movies to recommend.
+
+
+### 1. clusterFilms(titleFilmDF)
+
+Our first function clusters the movies based on their genre affiliation using k-means. As a decision criterion for the optimal cluster number an additional cluster should reduce heterogeneity to not less than 20%.
+
+In case of hetergeneity, we want to look at the the sum of the squared distance between each member of a cluster and its cluster centroid (SSE: sum of squared error). As the number of clusters increases, the SSE should decrease because clusters are, by definition, smaller. Here it stops building clusters when SSE decreases by less than 20%.
+
+tot.withinss = sum(withinss of every cluster)
+
+```{r}
+clusterFilms<-function(titleFilmDF){
+  set.seed(123)
+  i<-1
+  #get rid of movie ids and titles
+  titleFilmDF<-titleFilmDF[,c(-1,-2)]
+  repeat {
+    set.seed(123)
+    #build two kmeans models starting with 2 and 3 clusters and repeat until dss<0.2
+    i <- i + 1
+    movieCluster<-kmeans(titleFilmDF,i)
+    movieCluster2<-kmeans(titleFilmDF,i+1)
+    #decision criterion
+    dss<-((movieCluster$tot.withinss-movieCluster2$tot.withinss)/movieCluster$tot.withinss)
+    #exit if dss < 0.2
+    if (dss < 0.2) break
+  }
+ return(movieCluster)
+}
+```
+
+### 2. getUserInfo(userDF, userID)
+
+Find all the movies with the associated ratings our selected user has already watched. The return value is an activeUser data frame with the columns "itemid"(=movieid), "rating" and "cluster". 
+
+"cluster" is set to the dummy value zero.
+```{r}
+getUserInfo<-function(dat,id){
+  #Select all rows from user_DF that have the userid==user_id and keep the columns itemid & rating
+  a<-subset(dat, userid==id,select=c(itemid, rating))
+  # allocate 0 to the cluster column
+  cluster<-0
+  activeUser <- data.frame( a[order(a$itemid),] ,cluster)
+  return(activeUser)
+}
+```
+
+### 3. setUserFilmCluster(movieCluster, activeUser)
+
+Here we assign to each movie the corresponding cluster number.
+```{r}
+setUserFilmCluster<-function(movieCluster, activeUser){
+  # set up temporary dataframe to match cluster assignments to movie ids
+  df1<- data.frame(cbind(titleFilmDF$movid, clusterNum = movieCluster$cluster))
+  names(df1)<-c("movie_id", "cluster")
+  #This matches the cluster number to the activeUser movie id
+  activeUser$cluster<-df1[match(activeUser$itemid, df1$movie_id),2]
+  return(activeUser)
+}
+```
+
+### 4. getMeanClusterRating(movieCluster, activeUser)
+
+Calculate for each cluster the average of the movie ratings. The return value is "like", an integer vector, in which all clusters whose average rating is greater or equal 3 are included.
+
+If we do not find clusters with >= 3 rating, we give back a dummy value of zero.
+```{r}
+getMeanClusterRating<-function(movieCluster, activeUser){
+  #aggregate() function is used along with the cluster memberships to determine variable means for each cluster in the original metric
+  like<-aggregate(activeUser$rating, by=list(cluster=activeUser$cluster), mean)
+  #A bit different approach here: If the max mean rating is below three it gives out the dummy value zero
+  if(max(like$x)<3){
+    like<-as.vector(0)
+  #Else it gives out the cluster number of the max mean value
+  } else{
+    like<-as.vector(t(max(subset(like, x>=3, select=cluster))))
+  }
+  return(like)
+}
+```
+
+### 5. getGoodFilms(like, movieCluster, titleFilmDF)
+
+If we have several clusters which have a greater or equal "3" rating, we select the highest rating cluster.
+Now we search all movies of this cluster (both movies our user has and has not yet watched).
+
+If there is no cluster with a baseline rating of 3 or above, select at random 100 movies. The return value is an integer "recommend" vector containing the found or randomly selected movie IDs.
+
+```{r}
+getGoodFilms<-function(like, movieCluster, titleFilmDF){
+  # Again a temporary dataframe is created to get a list of all movies and their associated clusters
+  df1<- data.frame(cbind(titleFilmDF$movid, clusterNum = movieCluster$cluster))
+  names(df1)<-c("movie_id", "cluster")
+  #if like has the value zero it selects randomly 100 movies
+  if(like==0){
+    recommend<-titleFilmDf[sample.int(n = dim(titleFilmDF)[1], size = 100), 1]
+  }
+  #else it selects all movies from the winning max mean cluster
+  else{
+    recommend<-as.vector(t(subset(df1, cluster==like, select=movie_id)))
+  }
+  return(recommend)
+}
+```
+
+### 6. getRecommendedFilms(titleFilmDF, userDF, userid)
+
+Now we see the previously implemented functions in order to perform the following calculations:
+
+* Create a movie cluster and find the relevant information about our selected user.
+
+* Calculate the average rating per cluster and find the movies to the cluster, which our user likes the most.
+
+Select all movies our user has not yet seen. The return value contains in addition to the movie ID the movie title (movtitle).
+
+```{r}
+getRecommendedFilms<-function(titleFilmDF, userDF, userid){
+  # according to plan we call all functions in order of our logic
+  movieCluster<-clusterFilms(titleFilmDF)
+  activeUser<-getUserInfo(userDF, userid)
+  activeUser<-setUserFilmCluster(movieCluster, activeUser)
+  like<-getMeanClusterRating(movieCluster, activeUser)
+  recommend<-getGoodFilms(like, movieCluster, titleFilmDF)
+  # only select not yet watched movies
+  recommend<-recommend[-activeUser$itemid]
+  # add movietitle
+  movtitle<-titleFilmDF[match(recommend,titleFilmDF$movid),2]
+  recommend<-data.frame(recommend,movtitle)
+  return(recommend)
+}
+```
+
+### 7. suggestFilms(titleFilmDF, userDF, userid, noFilms)
+
+We're almost done! This function recommends a particular user (userid) a certain number (no_films) of movies.
+
+```{r}
+suggestFilms<-function(titleFilmDF, userDF, userid, no_films){
+  #get suggestions
+  suggestions = getRecommendedFilms(titleFilmDF, userDF, userid)
+  #select stated number of selections
+  suggestions = suggestions[1:no_films,]
+  #implementing some German here
+  writeLines("You may also like these movies:")
+  #print suggestions without column headers or row indices
+  write.table(suggestions[2], row.names = FALSE, col.names = FALSE)
+}
+```
+
+### 8. Ta da!
+
+Our finished recommender should look like this:
+
+```{r}
+suggestFilms(titleFilmDF, userDF, 6, 15)
+```
+
