@@ -6,5 +6,5 @@ The reason I was keen on posting these is because with relatively little knowled
 Please feel free to shoot over any comments or suggestions to improve these exercises!
 
 ## Content
-*  [Content-based Recommender Markdown](https://github.com/tim-dim/cbRecommender/blob/master/recommender.Rmd)
-*  [Content-based Recommender Source Code](https://github.com/tim-dim/cbRecommender/blob/master/recommender.R)
+*  [Content-based Recommender: Markdown](https://github.com/tim-dim/cbRecommender/blob/master/recommender.Rmd)
+*  [Content-based Recommender: Source Code](https://github.com/tim-dim/cbRecommender/blob/master/recommender.R)
