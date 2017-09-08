@@ -6,7 +6,7 @@ output:
   html_document:
     highlight: haddock
 ---
-##About the Task
+## About the Task
 
 Result of the exercise is a functional content-based recommender for movie recommendations, which takes as inputs:
 
